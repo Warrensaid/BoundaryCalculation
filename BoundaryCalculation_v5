@@ -1,0 +1,390 @@
+% modified by 04/13/2016
+% For the case that start point is isolated from the slinepoint group (HexagonCrystalGrowth_3.mat/77)
+% (because the selection of slinePoint based on the image value of start point):
+% find the double point around start point, if the image value is the same with
+% start point, go the original process. If the image value does not match the 
+% start point's value, select linePoint by the image value of double point.
+
+% modified by 04/14/2016
+% if linePoint is empty or start/end point only have 1 pixel, the adjacent
+% phase will be deleted
+
+clear
+clc
+
+load('HexagonCrystalGrowth_3.mat')
+image=grainconfig(:,:,10);
+%image=grainconfigend;
+mImage=[];
+% scan image to find triple jucntion pixels and double junction pixels
+
+imageSize=size(image);
+
+% mimage is the image with addtional border(-1)
+mImage=ones(size(image,2)+2,size(image,1)+2).*(-1);
+
+bImage=mImage;% Highlight the triple jucntion pixels and double junction pixels
+for n=1:size(image,1)
+    mImage(n+1,:)=[-1,image(n,:),-1];
+end
+xmax=size(mImage,2);
+ymax=size(mImage,1);
+surroundPixels=[-1,-1,-1,-1];
+grainNumber=[];
+triplePoints=[];
+doublePoints=[];
+unik=0;
+ti=1; %triple point index
+di=1; %double point index
+% eight direction around target pixel
+edirections=[0,1;1,1;1,0;1,-1;0,-1;-1,-1;-1,0;-1,1]; 
+% four direction around target pixel
+fdirections=[1,0;0,1;0,-1;-1,0];
+% diagonal direction
+ddirections=[1,1;1,-1;-1,-1;-1,1];
+
+%% scan image to find grain number, triple jucntion pixels and double junction pixels.
+% The scan process is made of two steps, bulk scan and border scan.
+% The corner pixels are not counted.
+
+% scan bulk pixels, triple jucntion pixels are boundary start/end points 
+for i=2:(ymax-1)
+    for j=2:(xmax-1)
+        
+        % find triple jucntion pixels and double junction pixels
+        % image values of surrounding pixels in four direction
+        for m=1:4
+            surroundPixels(m)=mImage(i+fdirections(m,1),j+fdirections(m,2));
+        end
+        %surroundPixels(m+1)=mImage(i,j);
+        unik=unique(surroundPixels);
+        uniksize=size(unik);
+        % find triple junction pixels triplePoint(x,y,phase1,phase2,phase3)
+        if uniksize(1,2)==3
+            triplePoints(ti,1)=i;
+            triplePoints(ti,2)=j;
+            triplePoints(ti,3)=unik(1);
+            triplePoints(ti,4)=unik(2);
+            triplePoints(ti,5)=unik(3);
+            ti=ti+1;
+            bImage(i,j)=150;%mImage(i,j)+150; % highlight triple jucntion pixels 
+        % find double junction pixels doublePoint(x,y,phase1,phase2)   
+        elseif uniksize(1,2)==2
+            doublePoints(di,1)=i;
+            doublePoints(di,2)=j;
+            doublePoints(di,3)=unik(1);
+            doublePoints(di,4)=unik(2);
+            di=di+1;
+            bImage(i,j)=50;%mImage(i,j)+50; % highlight double jucntion pixels
+        else
+            bImage(i,j)=-1; 
+        end
+    end
+end
+
+% get adjacent phases and grain number based on the triple junction pixels group
+adjacentPhases=[];
+api=1;
+for n=1:size(triplePoints,1)
+    p_1=triplePoints(n,3);p_2=triplePoints(n,4);p_3=triplePoints(n,5); %p_1<p_2<p_3
+    if p_1*p_2*p_3>0
+    adjacentPhases(api,:)=[p_1,p_2];
+    adjacentPhases(api+1,:)=[p_1,p_3]; 
+    adjacentPhases(api+2,:)=[p_2,p_3]; 
+    api=api+3;
+    grainNumber=[grainNumber,p_1,p_2,p_3]; 
+    else
+        adjacentPhases(api,:)=[p_2,p_3];
+        grainNumber=[grainNumber,p_2,p_3];
+        api=api+1;
+    end
+end
+grainNumber=unique(grainNumber);
+% simplify the adjacent phases matrix
+ap=[];
+api=1;
+for n=1:length(adjacentPhases)
+    x_phase1=adjacentPhases(n,1);
+    y_phase1=adjacentPhases(n,2);
+    for m=(n+1):length(adjacentPhases)
+        x_phase2=adjacentPhases(m,1);
+        y_phase2=adjacentPhases(m,2);
+        if [x_phase1,y_phase1]==[x_phase2,y_phase2]|[y_phase1,x_phase1]==[x_phase2,y_phase2];
+            ap(api)=m;
+            api=api+1;
+        end
+    end
+end
+adjacentPhases(unique(ap),:)=[];
+
+% start/end pixels group
+sePixels=triplePoints;
+sePixels=sortrows(sePixels,1);
+sePoint=[];
+boundaryLength=[];
+szap=size(adjacentPhases);
+
+%% get the chaincode
+for x=1:szap(1,1)
+% find the adjacent phases in start/end group
+    phase_1=adjacentPhases(x,1);
+    phase_2=adjacentPhases(x,2);
+    phase_1f=find(sePixels'==phase_1)/5;
+    pffi=1;
+    for n=1:length(phase_1f)
+        if (rem(phase_1f(n)*0.99999,1)-0.5)>=0
+        phase_1k(pffi)=ceil(phase_1f(n));
+        pffi=pffi+1;
+        end
+    end
+    pfsi=1;
+    phase_2f=find(sePixels'==phase_2)/5;
+    for n=1:length(phase_2f)
+        if (rem(phase_2f(n)*0.99999,1)-0.5)>=0
+            phase_2k(pfsi)=ceil(phase_2f(n));
+            pfsi=pfsi+1;
+        end
+    end
+% start/end pixels group
+        sePoint=intersect(phase_1k,phase_2k);
+        
+% neglect the phases only have one pixel        
+        if size(sePoint)<2
+            continue
+        end
+        phase_1k=[];
+        phase_2k=[];
+        
+% modify the start/end point group based on the image value
+        mse=1;
+        msePoint=[];
+        for n=1:length(sePoint)
+            aa=sePixels(sePoint(n),:);
+            if mImage(aa(1,1),aa(1,2))==phase_1||mImage(aa(1,1),aa(1,2))==phase_2
+                msePoint(mse)=sePoint(n);
+                mse=mse+1;
+            end
+        end
+        if length(msePoint)>2
+            rr=1;
+            rse=[];
+            for n=1:length(msePoint)
+                ta=sePixels(msePoint(n),:);
+                for m=(n+1):length(msePoint)
+                    tb=sePixels(msePoint(m),:);
+                    if norm(ta(1,1:2)-tb(1,1:2))<2
+                        rse(rr)=m;
+                        rr=rr+1;
+                    end
+                end
+            end
+            msePoint(unique(rse))=[];     
+        end
+        
+        if size(msePoint,2)<2
+             continue   
+        end
+        
+    startPoint=sePixels(msePoint(1),:);
+    endPoint=sePixels(msePoint(2),:);
+    %get the pixels on boundary
+    
+    szd=size(doublePoints);
+    linePoint=[];
+    lpi=1; %linpoint index
+    for n=1:szd
+        if doublePoints(n,3)==phase_1&&doublePoints(n,4)==phase_2
+        linePoint(lpi,:)=doublePoints(n,:);
+        lpi=lpi+1;
+        end
+    end
+    if size(linePoint,1)<1
+        continue
+    end
+    
+    %mlinePoint is the boundary, mlinePoint(x,y), start with the start point
+    %surroundsp is the pixels around the start point, the intersect of
+    %surroundsp and slinepoint gives the second pixels in the chain
+    %mlinePoint is the boundary
+   
+    %pixels around start point
+    for m=1:8
+            surroundsp(m,1)=startPoint(1,1)+edirections(m,1);
+            surroundsp(m,2)=startPoint(1,2)+edirections(m,2);
+    end
+    ssp=[];
+    sspi=1;
+    
+    % find intercept between surroundsp and linePoint
+    for n=1:8
+        for m=1:size(linePoint,1)
+            if surroundsp(n,1)==linePoint(m,1)&&surroundsp(n,2)==linePoint(m,2)
+                ssp(sspi,:)=linePoint(m,:);
+                sspi=sspi+1;
+            end
+        end
+    end
+   boundaryPhase=-2; % the image value of boundary pixels
+   for n=1:size(ssp,1)
+       if mImage(ssp(n,1),ssp(n,2))==mImage(startPoint(1,1),startPoint(1,2))
+           boundaryPhase=mImage(startPoint(1,1),startPoint(1,2));
+       end
+   end
+   if boundaryPhase==-2;
+       boundaryPhase=mImage(ssp(n,1),ssp(n,2));
+   end
+   
+   %slinePoint(x,y,phase1,phase2)
+   slp=1;
+   slinePoint=[]; 
+   for n=1:size(linePoint,1)
+        if mImage(linePoint(n,1),linePoint(n,2))==boundaryPhase 
+            slinePoint(slp,:)=linePoint(n,:);
+            slp=slp+1;
+        end
+   end
+   slinePoint(slp,:)=endPoint(1,1:4); 
+   szslp=size(slinePoint);
+   chaincode=[];
+   cci=1; % index of chaincode
+   mlinePoint(1,:)=startPoint(1,1:2);
+   secondPoint=[];
+   scp=1;
+   imagevalue=[];
+   del=[];
+   
+    %the second counted pixels
+    for n=1:szslp(1,1)
+        for m=1:8
+            if slinePoint(n,1)==surroundsp(m,1)&&slinePoint(n,2)==surroundsp(m,2)
+                secondPoint(scp,1:2)=slinePoint(n,1:2);
+                secondPoint(scp,3:4)=[n,m];
+                scp=scp+1;
+            end
+        end
+    end
+    % the counted pixels are resigned coordinate (-1,-1)
+    
+    szsp=size(secondPoint);
+    if szsp(1,1)==1
+        mlinePoint(2,:)=secondPoint(1,1:2);
+        chaincode(cci)=secondPoint(1,4);
+        cci=cci+1;
+    else
+        for m=1:szsp(1,1)
+            for l=1:8
+                srundsp(l,1)=secondPoint(m,1)+edirections(l,1);
+                srundsp(l,2)=secondPoint(m,2)+edirections(l,2);
+                imagevalue(l)=mImage(srundsp(1,1),srundsp(1,1));
+            end
+            if unique(imagevalue)~=1
+                   del=m;
+            end
+        end
+        secondPoint(del,:)=[];
+        mlinePoint(2,:)=secondPoint(1,1:2);
+        chaincode(cci)=secondPoint(1,4);
+        cci=cci+1;
+    end
+    slinePoint(secondPoint(:,3),1:2)=-1;
+    dir=mlinePoint(2,:);
+    mlp=3;
+    for n=1:(szslp(1,1)-1)
+        for m=1:8
+            surroundPoints(m,1)=dir(1,1)+edirections(m,1);
+            surroundPoints(m,2)=dir(1,2)+edirections(m,2);
+        end
+        nextPoint=[];
+        npi=1;
+        for o=1:8
+            for l=1:szslp(1,1)
+                if slinePoint(l,1)==surroundPoints(o,1)&&slinePoint(l,2)==surroundPoints(o,2)
+                    nextPoint(npi,1:2)=slinePoint(l,1:2);
+                    nextPoint(npi,3)=l; % location in slinePoint
+                    nextPoint(npi,4)=o; % location in the surround dirction
+                    npi=npi+1;
+                end
+            end
+        end
+        
+        if npi>1 % if there are two pixels surround the point
+            del=[];
+            snp=[];snpi=1;
+            for k=1:size(nextPoint,1)
+                for kk=1:8
+                    snp(snpi,:)=nextPoint(k,1:2)+edirections(kk,:);
+                    snpi=snpi+1;
+                end
+                for kk=1:8
+                    kki=0;
+                    for kkk=1:size(slinePoint,1)
+                        if snp(kk,1:2)==slinePoint(kkk,1:2)
+                            kki=kki+1;
+                        end
+                    end
+                end
+                if kki>1
+                    del=[del,k];
+                end
+            end
+            nextPoint(del)=[];
+        elseif size(nextPoint,1)==0
+            evenNumber=chaincode(find(mod(chaincode,2)==0));
+            oddNumber=chaincode(find(mod(chaincode,2)~=0));
+            szen=size(evenNumber);
+            szon=size(oddNumber);
+            szcn=sum(chaincode~=[chaincode(end),chaincode(1:end-1)]);
+            boundaryLength(x,1)=phase_1;
+            boundaryLength(x,2)=phase_2;
+            boundaryLength(x,3)=szon(1,2)*0.98+szen(1,2)*1.406-szcn*0.091;
+            continue    
+        end
+        mlinePoint(mlp,:)=nextPoint(1,1:2);
+        dir(1,1)=nextPoint(1,1);
+        dir(1,2)=nextPoint(1,2);
+        chaincode(cci)=nextPoint(1,4);
+        cci=cci+1; mlp=mlp+1;
+        slinePoint(nextPoint(1,3),1:2)=[-1,-1];
+    end
+%%  count boundary length
+% even number, odd number and corner number in the chaincode
+  evenNumber=chaincode(find(mod(chaincode,2)==0));
+  oddNumber=chaincode(find(mod(chaincode,2)~=0));
+  szen=size(evenNumber);
+  szon=size(oddNumber);
+  szcn=sum(chaincode~=[chaincode(end),chaincode(1:end-1)]);
+
+% boundary length
+  boundaryLength(x,1)=phase_1;
+  boundaryLength(x,2)=phase_2;
+  boundaryLength(x,3)=szon(1,2)*0.98+szen(1,2)*1.406-szcn*0.091;
+ 
+end
+%imagesc(bImage);
+bld=[];
+for n=1:size(boundaryLength,1)
+    if boundaryLength(n,1)==0
+       bld=[bld,n];
+    end
+end
+boundaryLength(bld,:)=[];
+
+boundaryLength
+%% Calculate the misorientation and plot the histogram
+%{
+gb_misorientation=[];% (phase1,phase2,misorientation,boundarylength)
+gbmi=1;
+for n=1:size(boundaryLength,1)
+    if boundaryLength(n,1)*boundaryLength(n,2)==0
+        continue
+    end
+    gb_misorientation(gbmi,1)=boundaryLength(n,1);
+    gb_misorientation(gbmi,2)=boundaryLength(n,2);
+    gb_misorientation(gbmi,3)=rem(180/pi.*abs(grainori(boundaryLength(n,1))-grainori(boundaryLength(n,2))), 60)-30;
+    gb_misorientation(gbmi,4)=boundaryLength(n,3);
+    gbmi=gbmi+1;
+end
+
+gb_misorientation
+%hist(gb_misorientation(:,3), 10);
+%}
